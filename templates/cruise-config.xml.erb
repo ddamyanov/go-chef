@@ -1,0 +1,726 @@
+<?xml version="1.0" encoding="utf-8"?>
+<cruise xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="cruise-config.xsd" schemaVersion="72">
+  <server artifactsdir="artifacts" commandRepositoryLocation="default" serverId="fa54b2e1-0bca-4d7f-8f72-b61c75383abf">
+    <security>
+      <passwordFile path="/var/go/.ssh/passwd" />
+      <admins>
+        <user>admin</user>
+        <user>ivan.petkov</user>
+      </admins>
+    </security>
+  </server>
+  <pipelines group="Mac-whoami">
+    <pipeline name="MacTest">
+      <materials>
+        <git url="https://ivan_petkov@bitbucket.org/ivan_petkov/public.git" />
+      </materials>
+      <stage name="First">
+        <jobs>
+          <job name="Blah">
+            <tasks>
+              <exec command="bash">
+                <arg>mini.sh</arg>
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+    </pipeline>
+  </pipelines>
+  <pipelines group="TumbIT-Mobile">
+    <pipeline name="iOS" isLocked="true">
+      <environmentvariables>
+        <variable name="DEVICE">
+          <value>device</value>
+        </variable>
+        <variable name="APPNAME">
+          <value>Java2Days</value>
+        </variable>
+        <variable name="OUTPUT_DIR">
+          <value>bin/ios</value>
+        </variable>
+      </environmentvariables>
+      <materials>
+        <git url="git@bitbucket.org:tumba/tumbit-mobile.git" dest="app" />
+        <git url="git@bitbucket.org:tumba/tumbit-devops.git" branch="ios_provision" dest="provision" />
+      </materials>
+      <stage name="prepare" cleanWorkingDir="true">
+        <jobs>
+          <job name="addPlatform">
+            <tasks>
+              <exec command="bash" workingdir="app">
+                <arg>-c</arg>
+                <arg>cordova platform add ios</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="postPrepare" fetchMaterials="false" artifactCleanupProhibited="true">
+        <environmentvariables>
+          <variable name="UT_PROJECT_ID">
+            <value>b976fbf0-5052-11e4-ab18-22000ac44c54</value>
+          </variable>
+        </environmentvariables>
+        <jobs>
+          <job name="addPlugin">
+            <tasks>
+              <exec command="bash" workingdir="app">
+                <arg>-c</arg>
+                <arg>/usr/libexec/PlistBuddy -c "Add ubertesters_project_id string "$UT_PROJECT_ID"" "$(pwd)/platforms/ios/$APPNAME/$APPNAME-Info.plist"</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash" workingdir="app">
+                <arg>-c</arg>
+                <arg>cordova plugin add https://github.com/Ubertesters/cordova-ubertesters.git</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash" workingdir="app">
+                <arg>-c</arg>
+                <arg>gsed -i -e "s/version=\"0.0.1\"/version=\"0.0.$GO_PIPELINE_COUNTER\"/" config.xml</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+          <job name="sortDependencies">
+            <tasks>
+              <exec command="bash" workingdir="app">
+                <arg>-c</arg>
+                <arg>bower install</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="build" fetchMaterials="false" artifactCleanupProhibited="true">
+        <jobs>
+          <job name="buildPlatform">
+            <tasks>
+              <exec command="bash" workingdir="app">
+                <arg>-c</arg>
+                <arg>cordova build ios --$DEVICE</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="pack" fetchMaterials="false" artifactCleanupProhibited="true">
+        <jobs>
+          <job name="package">
+            <tasks>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>mkdir -pv $OUTPUT_DIR</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>xcrun -sdk iphoneos PackageApplication -v "$(pwd)/app/platforms/ios/build/$DEVICE/$APPNAME.app" -o "$(pwd)/$OUTPUT_DIR/$APPNAME.ipa"</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+            <artifacts>
+              <artifact src="bin/ios/*ipa" />
+            </artifacts>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="deliver" fetchMaterials="false" artifactCleanupProhibited="true">
+        <environmentvariables>
+          <variable name="UT_API_ACCESS">
+            <value>39866a0030f60132187322000ac44c54</value>
+          </variable>
+        </environmentvariables>
+        <jobs>
+          <job name="ubertesters">
+            <tasks>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>curl -X POST http://beta.ubertesters.com/api/client/upload_build.json -H "X-UbertestersApiKey:$UT_API_ACCESS" -F "file=@$OUTPUT_DIR/$APPNAME.ipa" -F "title=$APPNAME" -F "stop_previous=true"</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="S3upload" fetchMaterials="false">
+        <jobs>
+          <job name="S3uploader">
+            <tasks>
+              <fetchartifact pipeline="iOS" stage="pack" job="package" srcfile="Java2Days.ipa">
+                <runif status="passed" />
+              </fetchartifact>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>aws s3 cp Java2Days.ipa s3://tumbit.mobile/iOS/distribution/java2days-$GO_PIPELINE_COUNTER/</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>linux</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+    </pipeline>
+    <pipeline name="Android" isLocked="true">
+      <environmentvariables>
+        <variable name="APPNAME">
+          <value>Java2Days</value>
+        </variable>
+        <variable name="BUILD_TYPE">
+          <value>debug</value>
+        </variable>
+        <variable name="OUTPUT_DIR">
+          <value>bin/android/</value>
+        </variable>
+        <variable name="key_store">
+          <value>tumbit-key.keystore</value>
+        </variable>
+        <variable name="key_alias">
+          <value>tumbit</value>
+        </variable>
+        <variable name="key_store_password" secure="true">
+          <encryptedValue>ltTt9yS8B9gbri0C7vLSuA==</encryptedValue>
+        </variable>
+        <variable name="key_alias_password" secure="true">
+          <encryptedValue>ltTt9yS8B9gbri0C7vLSuA==</encryptedValue>
+        </variable>
+      </environmentvariables>
+      <materials>
+        <git url="git@bitbucket.org:tumba/tumbit-mobile.git" dest="app" />
+        <git url="git@bitbucket.org:tumba/tumbit-devops.git" branch="android_provision" dest="provision" />
+      </materials>
+      <stage name="prepare" cleanWorkingDir="true">
+        <jobs>
+          <job name="addPlatform">
+            <tasks>
+              <exec command="cordova" workingdir="app">
+                <arg>platform</arg>
+                <arg>add</arg>
+                <arg>android</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="postPrepare" fetchMaterials="false" artifactCleanupProhibited="true">
+        <environmentvariables>
+          <variable name="UT_PROJECT_ID">
+            <value>b976fbf0-5052-11e4-ab18-22000ac44c54</value>
+          </variable>
+        </environmentvariables>
+        <jobs>
+          <job name="includeUbertesters">
+            <tasks>
+              <exec command="cordova" workingdir="app">
+                <arg>plugin</arg>
+                <arg>add</arg>
+                <arg>https://github.com/Ubertesters/cordova-ubertesters.git</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash" workingdir="app/platforms/android">
+                <arg>-c</arg>
+                <arg>gsed -i "/[&lt;\/]application[&gt;]/i\ &lt;meta-data android:name=\"ubertesters_project_id\" android:value=\"$UT_PROJECT_ID\"/&gt;" AndroidManifest.xml</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash" workingdir="app">
+                <arg>-c</arg>
+                <arg>gsed -i -e "s/version=\"0.0.1\"/version=\"0.0.$GO_PIPELINE_COUNTER\"/" config.xml</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+          <job name="sortDependancies">
+            <tasks>
+              <exec command="bower" workingdir="app">
+                <arg>install</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+          <job name="prepareProvisionData">
+            <tasks>
+              <exec command="bash" workingdir="app/platforms/android">
+                <arg>-c</arg>
+                <arg>echo key.store=$key_store &gt; ant.properties</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash" workingdir="app/platforms/android">
+                <arg>-c</arg>
+                <arg>echo key.alias=$key_alias &gt;&gt; ant.properties</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash" workingdir="app/platforms/android">
+                <arg>-c</arg>
+                <arg>echo key.store.password=$key_store_password &gt;&gt; ant.properties</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash" workingdir="app/platforms/android">
+                <arg>-c</arg>
+                <arg>echo key.alias.password=$key_alias_password &gt;&gt; ant.properties</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>cp -v provision/$key_store app/platforms/android/$key_store</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="build" fetchMaterials="false" artifactCleanupProhibited="true">
+        <jobs>
+          <job name="buildPlatform">
+            <tasks>
+              <exec command="bash" workingdir="app">
+                <arg>-c</arg>
+                <arg>cordova build android --BUILD_TYPE</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>mkdir -pv $OUTPUT_DIR</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>cp -v app/platforms/android/ant-build/$APPNAME-$BUILD_TYPE.apk $OUTPUT_DIR</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+            <artifacts>
+              <artifact src="bin/android/" />
+            </artifacts>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="deliver" fetchMaterials="false" artifactCleanupProhibited="true">
+        <environmentvariables>
+          <variable name="UT_API_ACCESS">
+            <value>39866a0030f60132187322000ac44c54</value>
+          </variable>
+        </environmentvariables>
+        <jobs>
+          <job name="ubertesters">
+            <tasks>
+              <exec command="ls">
+                <runif status="passed" />
+              </exec>
+              <fetchartifact pipeline="Android" stage="build" job="buildPlatform" srcdir="bin/android/" dest="bin">
+                <runif status="passed" />
+              </fetchartifact>
+              <exec command="bash">
+                <arg>-xc</arg>
+                <arg>eval $(curl -X POST http://beta.ubertesters.com/api/client/upload_build.json -H "X-UbertestersApiKey:$UT_API_ACCESS" -F "file=@$(pwd)/$OUTPUT_DIR$APPNAME-$BUILD_TYPE.apk" -F "title=$APPNAME" -F "stop_previous=true" | awk -F'[:, ]' '{print $2}')</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="S3upload" fetchMaterials="false">
+        <jobs>
+          <job name="S3uploader">
+            <tasks>
+              <fetchartifact pipeline="Android" stage="build" job="buildPlatform" srcdir="bin/android">
+                <runif status="passed" />
+              </fetchartifact>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>aws s3 sync ./android/ s3://tumbit.mobile/android/debug/</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>linux</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+    </pipeline>
+    <pipeline name="iOS-Submission" isLocked="true">
+      <environmentvariables>
+        <variable name="DEVICE">
+          <value>device</value>
+        </variable>
+        <variable name="APPNAME">
+          <value>Java2Days</value>
+        </variable>
+        <variable name="OUTPUT_DIR">
+          <value>bin/ios/release</value>
+        </variable>
+      </environmentvariables>
+      <materials>
+        <git url="git@bitbucket.org:tumba/tumbit-mobile.git" dest="app" />
+        <git url="git@bitbucket.org:tumba/tumbit-devops.git" branch="ios_provision" dest="provision" />
+      </materials>
+      <stage name="prepare" cleanWorkingDir="true">
+        <approval type="manual" />
+        <jobs>
+          <job name="addPlatform">
+            <tasks>
+              <exec command="bash" workingdir="app">
+                <arg>-c</arg>
+                <arg>cordova platform add ios</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="postPrepare" fetchMaterials="false" artifactCleanupProhibited="true">
+        <environmentvariables>
+          <variable name="UT_PROJECT_ID">
+            <value>b976fbf0-5052-11e4-ab18-22000ac44c54</value>
+          </variable>
+        </environmentvariables>
+        <jobs>
+          <job name="sortDependencies">
+            <tasks>
+              <exec command="bash" workingdir="app">
+                <arg>-c</arg>
+                <arg>bower install</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+          <job name="configAppVersion">
+            <tasks>
+              <exec command="echo">
+                <arg>placeholder</arg>
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+          <job name="ConfigSignIdentity">
+            <tasks>
+              <exec command="bash" workingdir="app/platforms/ios/cordova">
+                <arg>-c</arg>
+                <arg>echo CODE_SIGN_IDENTITY = iPhone Distribution &gt; build.xcconfig</arg>
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="build" fetchMaterials="false" artifactCleanupProhibited="true">
+        <jobs>
+          <job name="buildPlatform">
+            <tasks>
+              <exec command="bash" workingdir="app">
+                <arg>-c</arg>
+                <arg>cordova build ios --device --release</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="pack" fetchMaterials="false" artifactCleanupProhibited="true">
+        <jobs>
+          <job name="package">
+            <tasks>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>mkdir -pv $OUTPUT_DIR</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>xcrun -sdk iphoneos PackageApplication -v "$(pwd)/app/platforms/ios/build/device/$APPNAME.app" -o "$(pwd)/$OUTPUT_DIR/$APPNAME.ipa"</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+            <artifacts>
+              <artifact src="bin/ios/release" />
+            </artifacts>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="S3upload" fetchMaterials="false">
+        <jobs>
+          <job name="S3uploader">
+            <tasks>
+              <fetchartifact pipeline="iOS-Submission" stage="pack" job="package" srcfile="release/Java2Days.ipa">
+                <runif status="passed" />
+              </fetchartifact>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>aws s3 cp  Java2Days.ipa s3://tumbit.mobile/iOS/distribution/java2days-$GO_PIPELINE_COUNTER/</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>linux</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+    </pipeline>
+    <pipeline name="Android-Distribution" isLocked="true">
+      <environmentvariables>
+        <variable name="APPNAME">
+          <value>Java2Days</value>
+        </variable>
+        <variable name="BUILD_TYPE">
+          <value>release</value>
+        </variable>
+        <variable name="OUTPUT_DIR">
+          <value>bin/android/</value>
+        </variable>
+        <variable name="key_store">
+          <value>tumbit-key.keystore</value>
+        </variable>
+        <variable name="key_alias">
+          <value>tumbit</value>
+        </variable>
+        <variable name="key_store_password" secure="true">
+          <encryptedValue>ltTt9yS8B9gbri0C7vLSuA==</encryptedValue>
+        </variable>
+        <variable name="key_alias_password" secure="true">
+          <encryptedValue>ltTt9yS8B9gbri0C7vLSuA==</encryptedValue>
+        </variable>
+      </environmentvariables>
+      <materials>
+        <git url="git@bitbucket.org:tumba/tumbit-mobile.git" dest="app" />
+        <git url="git@bitbucket.org:tumba/tumbit-devops.git" branch="android_provision" dest="provision" />
+      </materials>
+      <stage name="prepare" cleanWorkingDir="true">
+        <approval type="manual" />
+        <jobs>
+          <job name="addPlatform">
+            <tasks>
+              <exec command="cordova" workingdir="app">
+                <arg>platform</arg>
+                <arg>add</arg>
+                <arg>android</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="postPrepare" fetchMaterials="false" artifactCleanupProhibited="true">
+        <environmentvariables>
+          <variable name="UT_PROJECT_ID">
+            <value>b976fbf0-5052-11e4-ab18-22000ac44c54</value>
+          </variable>
+        </environmentvariables>
+        <jobs>
+          <job name="sortDependancies">
+            <tasks>
+              <exec command="bower" workingdir="app">
+                <arg>install</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+          <job name="prepareProvisionData">
+            <tasks>
+              <exec command="bash" workingdir="app/platforms/android">
+                <arg>-c</arg>
+                <arg>echo key.store=$key_store &gt; ant.properties</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash" workingdir="app/platforms/android">
+                <arg>-c</arg>
+                <arg>echo key.alias=$key_alias &gt;&gt; ant.properties</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash" workingdir="app/platforms/android">
+                <arg>-c</arg>
+                <arg>echo key.store.password=$key_store_password &gt;&gt; ant.properties</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash" workingdir="app/platforms/android">
+                <arg>-c</arg>
+                <arg>echo key.alias.password=$key_alias_password &gt;&gt; ant.properties</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>cp -v provision/$key_store app/platforms/android/$key_store</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+          <job name="configBuildVersion">
+            <tasks>
+              <exec command="echo">
+                <arg>placeholder</arg>
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="build" fetchMaterials="false" artifactCleanupProhibited="true">
+        <jobs>
+          <job name="buildPlatform">
+            <tasks>
+              <exec command="bash" workingdir="app">
+                <arg>-c</arg>
+                <arg>cordova build android --$BUILD_TYPE</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>mkdir -pv $OUTPUT_DIR</arg>
+                <runif status="passed" />
+              </exec>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>cp -v app/platforms/android/ant-build/$APPNAME-$BUILD_TYPE.apk $OUTPUT_DIR</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>mac</resource>
+            </resources>
+            <artifacts>
+              <artifact src="bin/android/" />
+            </artifacts>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="S3upload" fetchMaterials="false">
+        <jobs>
+          <job name="S3uploader">
+            <tasks>
+              <fetchartifact pipeline="Android-Distribution" stage="build" job="buildPlatform" srcdir="bin/android">
+                <runif status="passed" />
+              </fetchartifact>
+              <exec command="bash">
+                <arg>-c</arg>
+                <arg>aws s3 sync ./android/ s3://tumbit.mobile/android/distribution/</arg>
+                <runif status="passed" />
+              </exec>
+            </tasks>
+            <resources>
+              <resource>linux</resource>
+            </resources>
+          </job>
+        </jobs>
+      </stage>
+      <stage name="deliver" fetchMaterials="false" artifactCleanupProhibited="true">
+        <approval type="manual" />
+        <environmentvariables>
+          <variable name="UT_API_ACCESS">
+            <value>39866a0030f60132187322000ac44c54</value>
+          </variable>
+        </environmentvariables>
+        <jobs>
+          <job name="deliver">
+            <tasks>
+              <ant />
+            </tasks>
+          </job>
+        </jobs>
+      </stage>
+    </pipeline>
+  </pipelines>
+  <environments>
+    <environment name="Linux">
+      <agents>
+        <physical uuid="deed6ec2-320c-4139-95c2-d309793faf8e" />
+      </agents>
+    </environment>
+    <environment name="Mac">
+      <agents>
+        <physical uuid="deed6ec2-320c-4139-95c2-d309793faf8e" />
+        <physical uuid="1ee2e871-3c5c-48ba-97eb-084504a7b5e3" />
+      </agents>
+      <pipelines>
+        <pipeline name="Android" />
+        <pipeline name="Android-Distribution" />
+        <pipeline name="iOS" />
+        <pipeline name="iOS-Submission" />
+      </pipelines>
+    </environment>
+  </environments>
+  <agents>
+    <agent hostname="java-app1" ipaddress="172.31.16.173" uuid="deed6ec2-320c-4139-95c2-d309793faf8e">
+      <resources>
+        <resource>linux</resource>
+      </resources>
+    </agent>
+    <agent hostname="minito.local" ipaddress="192.168.10.79" uuid="1ee2e871-3c5c-48ba-97eb-084504a7b5e3">
+      <resources>
+        <resource>mac</resource>
+      </resources>
+    </agent>
+  </agents>
+</cruise>
+
